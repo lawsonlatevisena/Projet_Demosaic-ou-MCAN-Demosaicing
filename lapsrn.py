@@ -116,16 +116,13 @@ class Net(nn.Module):
         self.outC = 16
         self.WB_Conv = nn.Conv2d(in_channels=16, out_channels=16, kernel_size=7, stride=1, padding=3, bias=False, groups=16)
         self.relu = nn.LeakyReLU(0.2, inplace=True)
-        self.front_conv_input = nn.Conv2d(in_channels=16, out_channels=64, kernel_size=3, stride=1, padding=1,
-                                          bias=True)
+        self.front_conv_input = nn.Conv2d(in_channels=16, out_channels=64, kernel_size=3, stride=1, padding=1, bias=True)
         self.convt_br1_front = self.make_layer(branch_block_front)
         self.convt_F1 = self.make_layer(_Conv_attention_Block)
         self.convt_F2 = self.make_layer(_Conv_attention_Block)
         self.convt_br1_back = self.make_layer(branch_block_back)
         self.P2W = Pos2Weight(outC=self.outC)
 
-        #self.P2W = Pos2Weight(outC=self.outC, inC=16)  # ✅ Reverted: inC=16 caused dimension mismatch
-        # self.mosaic_conv = ConvMosaic(in_channels=1, out_channels=16, kernel_size=5, msfa_size=4,stride=1, padding=2,bias=False)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
@@ -163,23 +160,12 @@ class Net(nn.Module):
     def forward(self, data, pos_mat):
         x, y = data
         WB_norelu = self.WB_Conv(x)
-        # _, HW, _ =  pos_mat.size()
-        # H = int(HW ** 0.5)
-        # pos_mat = pos_mat.view(1, H, H, 2)
-        # pos_mat = pos_mat[:, 0:4, 0:4, :]
-        # pos_mat = pos_mat.contiguous().view(1, 16, 2)
-        # local_weight = self.P2W(pos_mat.view(pos_mat.size(1), -1))
-        # local_weight = local_weight.view(4, 4, self.outC*5*5)
-        # local_weight = local_weight.repeat(int(H/4), int(H/4), 1)
-        # local_weight = local_weight.view(H*H, 400) # local_weight size :[(128*128), (5*5*16)]= [16384, 400]
         local_weight = self.P2W(pos_mat.view(pos_mat.size(1), -1))
         up_y = self.repeat_y(y)
         cols = nn.functional.unfold(up_y, 5, padding=2)
         scale_int = math.ceil(self.scale)
-        cols = cols.contiguous().view(cols.size(0) // (scale_int ** 2), scale_int ** 2, cols.size(1), cols.size(2),
-                                      1).permute(0, 1, 3, 4, 2).contiguous()
-        local_weight = local_weight.contiguous().view(y.size(2), scale_int, y.size(3), scale_int, -1,
-                                                      self.outC).permute(1, 3, 0, 2, 4, 5).contiguous()
+        cols = cols.contiguous().view(cols.size(0) // (scale_int ** 2), scale_int ** 2, cols.size(1), cols.size(2), 1).permute(0, 1, 3, 4, 2).contiguous()
+        local_weight = local_weight.contiguous().view(y.size(2), scale_int, y.size(3), scale_int, -1, self.outC).permute(1, 3, 0, 2, 4, 5).contiguous()
         local_weight = local_weight.contiguous().view(scale_int ** 2, y.size(2) * y.size(3), -1, self.outC)
         Raw_conv = torch.matmul(cols, local_weight).permute(0, 1, 4, 2, 3)
         Raw_conv = Raw_conv.contiguous().view(y.size(0), scale_int, scale_int, self.outC, y.size(2), y.size(3)).permute(
